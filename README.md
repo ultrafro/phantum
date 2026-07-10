@@ -28,7 +28,9 @@ Claude Code needs works — colors, interactive prompts, resizing, and
 - **Per-chat commands & flags** — pick a shell and toggle common Claude flags
   like `--dangerously-skip-permissions`, `--continue`, `--model`, and
   `--resume <session-id>` (resume a specific past conversation), or add any
-  extra arguments.
+  extra arguments. Enter a `--resume` session id and phantum **auto-detects the
+  project directory** that session belongs to and fills it in — otherwise
+  `claude --resume` can't find it.
 - **Rename in one gesture** — double-click a chat's name in the sidebar (or a
   pane's title) to rename it inline; Enter saves, Esc cancels.
 - **Sessions survive reloads** — closing a pane keeps its process running on
@@ -106,21 +108,22 @@ classic desktop folders.
 
 | Shortcut | Does |
 | --- | --- |
-| `Ctrl+V` / `Alt+V` | Paste — forwarded straight to Claude Code so it can grab **images** from your clipboard |
-| `Ctrl+Shift+V` | Paste clipboard **text** (bracketed) |
-| `Ctrl+Shift+C` | Copy the current selection |
-| Right-click | Paste clipboard text |
-| `Ctrl+C` | Stays SIGINT (interrupt), as in any terminal |
+| `Ctrl+C` | **Copies** the selection if there is one; otherwise sends SIGINT (interrupt) — just like Windows Terminal |
+| `Ctrl+Shift+C` | Always copies the selection |
+| `Ctrl+V` | **Pastes** — text goes into any shell; if the clipboard holds an image, Claude Code grabs it |
+| Right-click | Copies the selection, or pastes if nothing is selected |
 
-### Does image paste (Alt / Ctrl + V) work?
+Paste uses the browser's native paste event, so it works in every pane
+(PowerShell, cmd, Claude…) with no clipboard-permission prompt.
 
-**Yes.** Claude Code reads the operating-system clipboard *itself* when it
-receives the paste keystroke — it doesn't depend on the terminal shipping the
-image over the wire. phantum forwards the raw `Ctrl+V` / `Alt+V` keystroke
-directly to the pty (and stops the browser from hijacking it), so Claude Code
-sees the keypress and pulls the image from the same Windows clipboard you copied
-it to. Panes launched in the app-mode window (Edge/Chrome `--app`) also reclaim
-most reserved shortcuts.
+### Does image paste (Ctrl + V) work?
+
+**Yes.** When you paste and the clipboard holds an image, phantum hands Claude
+Code a raw `Ctrl+V`; Claude then reads the image straight from the OS clipboard
+itself (it runs on the same machine) — it never has to travel over the wire.
+Text pastes are delivered directly to the shell as a bracketed paste. Panes open
+in an app-mode window (Edge/Chrome `--app`), which also reclaims most reserved
+shortcuts.
 
 ---
 

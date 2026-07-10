@@ -168,6 +168,51 @@ app.get('/api/status', (req, res) => {
   res.json({ status: manager.statusMap() });
 });
 
+// Look up which directory a Claude Code session belongs to. `claude --resume
+// <id>` only finds a session when launched from that session's project dir, so
+// the new-chat dialog uses this to auto-fill the working directory.
+function findSessionCwd(id) {
+  const base = path.join(os.homedir(), '.claude', 'projects');
+  let dirs;
+  try {
+    dirs = fs.readdirSync(base);
+  } catch (_) {
+    return null;
+  }
+  for (const d of dirs) {
+    const file = path.join(base, d, id + '.jsonl');
+    if (!fs.existsSync(file)) continue;
+    // Read only the head of the file — sessions record their cwd on each entry.
+    let cwd = null;
+    try {
+      const fd = fs.openSync(file, 'r');
+      const buf = Buffer.alloc(65536);
+      const n = fs.readSync(fd, buf, 0, buf.length, 0);
+      fs.closeSync(fd);
+      const m = buf.toString('utf8', 0, n).match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+      if (m) {
+        try {
+          cwd = JSON.parse('"' + m[1] + '"');
+        } catch (_) {
+          cwd = m[1].replace(/\\\\/g, '\\');
+        }
+      }
+    } catch (_) {}
+    return { project: d, cwd };
+  }
+  return null;
+}
+
+app.get('/api/claude/session', (req, res) => {
+  const id = String(req.query.id || '').trim();
+  // Session ids are uuids; reject anything else so this can't be used to probe
+  // the filesystem.
+  if (!/^[a-zA-Z0-9-]{8,}$/.test(id)) return res.json({ found: false });
+  const info = findSessionCwd(id);
+  if (!info) return res.json({ found: false });
+  res.json({ found: true, cwd: info.cwd, project: info.project });
+});
+
 // ---- HTTP + WebSocket wiring ----------------------------------------------
 
 const server = http.createServer(app);

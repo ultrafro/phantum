@@ -396,7 +396,7 @@ async function openPane(chatId) {
     if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: d }));
   });
 
-  wireKeys(term, ws, pane);
+  wireKeys(term, pane, body);
 
   // Refit on any size change of the pane.
   const ro = new ResizeObserver(() => fitPane(pane));
@@ -477,69 +477,123 @@ function sendResize(pane) {
   }
 }
 
-// Key handling — this is what makes Claude Code's clipboard/image paste work.
-// We forward the raw paste keystrokes straight to the pty so Claude Code
-// reads the OS clipboard itself (it runs on the same machine), instead of
-// letting the browser swallow the event.
-function wireKeys(term, ws, pane) {
+// Copy text to the clipboard, with a no-permission fallback. Chromium allows
+// clipboard *writes* from a focused page, but execCommand('copy') via a hidden
+// textarea works even when the async API is blocked.
+function copyText(text) {
+  if (!text) return;
+  const done = () => {};
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text) {
+  const prev = document.activeElement;
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-2000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch (_) {}
+  if (prev && prev.focus) prev.focus();
+}
+
+// Key + clipboard handling.
+//   • Ctrl+C copies the selection if there is one, else sends SIGINT (like
+//     Windows Terminal). Ctrl+Shift+C always copies.
+//   • Paste uses the browser's native paste event — it delivers the clipboard
+//     on the user's gesture with NO permission prompt, and works in every pane
+//     (pwsh, cmd, Claude…). Text flows straight into the pty via xterm.
+//   • If the clipboard holds an image, we forward a raw Ctrl+V (0x16) so Claude
+//     Code reads the OS clipboard and attaches the image.
+function wireKeys(term, pane, body) {
+  const send = (data) => {
+    const s = pane.ws;
+    if (s && s.readyState === 1) s.send(JSON.stringify({ type: 'input', data }));
+  };
+
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
-
     const key = (e.key || '').toLowerCase();
 
-    // Ctrl+V (no shift) -> raw 0x16. Claude Code intercepts this and reads the
-    // clipboard, attaching an image if one is present.
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && key === 'v') {
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: '\x16' }));
-      e.preventDefault();
-      return false;
+    // Ctrl+C: copy a selection if present, otherwise let it interrupt.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && key === 'c') {
+      if (term.hasSelection()) {
+        copyText(term.getSelection());
+        term.clearSelection();
+        e.preventDefault();
+        return false;
+      }
+      return true; // no selection -> SIGINT passes through to the pty
     }
 
-    // Alt+V -> ESC v (some Claude Code builds bind image paste here).
-    if (e.altKey && !e.ctrlKey && key === 'v') {
-      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: '\x1bv' }));
-      e.preventDefault();
-      return false;
-    }
-
-    // Ctrl+Shift+V -> explicit *text* paste (bracketed) as a reliable fallback.
-    if (e.ctrlKey && e.shiftKey && key === 'v') {
-      navigator.clipboard
-        .readText()
-        .then((t) => {
-          if (t && ws.readyState === 1)
-            ws.send(
-              JSON.stringify({ type: 'input', data: `\x1b[200~${t}\x1b[201~` })
-            );
-        })
-        .catch(() => {});
-      e.preventDefault();
-      return false;
-    }
-
-    // Ctrl+Shift+C -> copy current selection (Ctrl+C stays SIGINT).
+    // Ctrl+Shift+C: always copy the selection.
     if (e.ctrlKey && e.shiftKey && key === 'c') {
-      const sel = term.getSelection();
-      if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+      if (term.hasSelection()) {
+        copyText(term.getSelection());
+        term.clearSelection();
+      }
       e.preventDefault();
       return false;
     }
+
+    // Ctrl+V / Ctrl+Shift+V: returning false stops xterm from emitting a raw
+    // ^V (0x16), but we deliberately DON'T preventDefault, so the browser's
+    // native paste event still fires and the paste listener below handles it.
+    if (e.ctrlKey && key === 'v') return false;
 
     return true;
   });
 
-  // Right-click pastes clipboard text (bracketed) — a familiar terminal habit.
+  // Native paste (fires on Ctrl+V and right-click→paste — a trusted gesture, so
+  // no clipboard permission is needed). We handle it explicitly: text goes to
+  // the pty as a bracketed paste; an image hands Claude a raw Ctrl+V so it reads
+  // the OS clipboard itself. Capture phase + stopImmediatePropagation so xterm
+  // doesn't also paste (which would double it).
+  body.addEventListener(
+    'paste',
+    (e) => {
+      const dt = e.clipboardData;
+      if (!dt) return;
+      const text = dt.getData('text');
+      const hasImage = [...(dt.items || [])].some(
+        (i) => i.type && i.type.startsWith('image/')
+      );
+      if (text) {
+        send(`\x1b[200~${text}\x1b[201~`);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (hasImage) {
+        send('\x16');
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+
+  // Right-click: copy the selection if there is one; otherwise paste.
   pane.el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    navigator.clipboard
-      .readText()
-      .then((t) => {
-        if (t && ws.readyState === 1)
-          ws.send(
-            JSON.stringify({ type: 'input', data: `\x1b[200~${t}\x1b[201~` })
-          );
-      })
-      .catch(() => {});
+    if (term.hasSelection()) {
+      copyText(term.getSelection());
+      term.clearSelection();
+    } else if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard
+        .readText()
+        .then((t) => {
+          if (t) send(`\x1b[200~${t}\x1b[201~`);
+        })
+        .catch(() => {});
+    }
   });
 }
 
@@ -660,6 +714,28 @@ function openDialog(chat = null) {
 function setFlag(flag, val) {
   const cb = $(`#claude-flags input[data-flag="${flag}"]`);
   if (cb) cb.checked = val;
+}
+
+// When a --resume session id is entered, look up the directory that session
+// belongs to and set the working directory to it — otherwise `claude --resume`
+// can't find the session (it's scoped to its project folder).
+async function detectResumeCwd() {
+  const id = $('#f-resume').value.trim();
+  if (!id) return;
+  $('#claude-flags input[data-flag="--resume"]').checked = true;
+  try {
+    const r = await fetch('/api/claude/session?id=' + encodeURIComponent(id));
+    const d = await r.json();
+    if (d.found && d.cwd) {
+      $('#f-cwd').value = d.cwd;
+      toast('Working directory set to ' + d.cwd + ' — where this session lives');
+    } else {
+      toast(
+        'No Claude session found with that id. Set the folder to that project manually.',
+        'bad'
+      );
+    }
+  } catch (_) {}
 }
 
 function closeDialog() {
@@ -924,6 +1000,7 @@ function wireUI() {
   $('#dialog-cancel').addEventListener('click', closeDialog);
   $('#dialog-save').addEventListener('click', saveDialog);
   $('#f-shell').addEventListener('change', onShellChange);
+  $('#f-resume').addEventListener('change', detectResumeCwd);
   $('#f-browse').addEventListener('click', () => onBrowseToggle());
   $('#dialog-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'dialog-backdrop') closeDialog();
