@@ -44,9 +44,9 @@ button {
 }
 
 #app {
-  display: grid;
-  grid-template-columns: 288px 1fr;
+  display: flex;
   height: 100vh;
+  --sbw: 288px;
 }
 
 /* ---- sidebar ---- */
@@ -56,6 +56,80 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  width: var(--sbw);
+  flex: 0 0 var(--sbw);
+  overflow: hidden;
+}
+
+/* Drag handle between the sidebar and the panes */
+#resizer {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 30;
+  transition: background 0.12s;
+}
+#resizer::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+}
+#resizer:hover::before,
+#app.resizing #resizer::before {
+  background: var(--accent);
+}
+#app.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+#app.resizing #stage,
+#app.resizing #sidebar {
+  pointer-events: none;
+}
+
+/* Collapsed state — hide the sidebar + handle, show a floating expand button */
+#app.collapsed #sidebar,
+#app.collapsed #resizer {
+  display: none;
+}
+#sidebar-expand {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 25;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+#sidebar-expand:hover {
+  border-color: var(--accent);
+}
+
+#collapse-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+#collapse-btn:hover {
+  color: var(--text);
+  background: var(--bg-3);
 }
 #sidebar-head {
   padding: 16px 16px 10px;

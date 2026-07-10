@@ -18,6 +18,7 @@
           <div class="brand">
             <span class="brand-mark">👻</span>
             <span class="brand-name">phantum</span>
+            <button id="collapse-btn" title="Collapse sidebar (Ctrl+B)">«</button>
           </div>
           <div class="brand-sub">terminal manager</div>
         </header>
@@ -54,7 +55,10 @@
         </footer>
       </aside>
 
+      <div id="resizer" title="Drag to resize · double-click to reset"></div>
+
       <main id="stage">
+        <button id="sidebar-expand" class="hidden" title="Show sidebar (Ctrl+B)">☰</button>
         <div id="panes"></div>
         <div id="empty-state" class="hidden">
           <div class="empty-inner">

@@ -550,6 +550,16 @@ function wireKeys(term, pane, body) {
     // native paste event still fires and the paste listener below handles it.
     if (e.ctrlKey && key === 'v') return false;
 
+    // Ctrl+Enter / Shift+Enter: insert a newline (multi-line prompt) instead of
+    // submitting. A plain terminal can't distinguish these from Enter, so we
+    // forward ESC+CR — the sequence Claude Code treats as "insert newline".
+    // Plain Enter still submits.
+    if ((e.ctrlKey || e.shiftKey) && !e.altKey && (e.key === 'Enter' || key === 'enter')) {
+      send('\x1b\r');
+      e.preventDefault();
+      return false;
+    }
+
     return true;
   });
 
@@ -925,6 +935,7 @@ async function onImportFile(e) {
 async function bootFromConfig() {
   renderSidebar();
   setColumnsUI(config.layout.columns || 'auto');
+  applySidebar();
   $('#config-path').textContent = runtime.configPath;
   // Re-open panes that were open last session (fresh terminals — old ptys
   // died with the previous server process, which is expected).
@@ -952,6 +963,64 @@ function setColumnsUI(cols) {
   );
 }
 
+// ---- sidebar width / collapse ----
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 560;
+const SIDEBAR_DEFAULT = 288;
+
+function applySidebar() {
+  const l = config.layout;
+  const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, l.sidebarWidth || SIDEBAR_DEFAULT));
+  $('#app').style.setProperty('--sbw', w + 'px');
+  const collapsed = !!l.sidebarCollapsed;
+  $('#app').classList.toggle('collapsed', collapsed);
+  $('#sidebar-expand').classList.toggle('hidden', !collapsed);
+  // Terminals need to refit after the stage changes size.
+  requestAnimationFrame(() => panes.forEach((p) => fitPane(p)));
+}
+
+function setSidebarCollapsed(collapsed) {
+  config.layout.sidebarCollapsed = collapsed;
+  applySidebar();
+  saveConfig();
+}
+
+function initSidebarResize() {
+  const app = $('#app');
+  const resizer = $('#resizer');
+  let dragging = false;
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    // clientX is the desired sidebar width (sidebar starts at x=0).
+    const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX));
+    app.style.setProperty('--sbw', w + 'px');
+    config.layout.sidebarWidth = w;
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    app.classList.remove('resizing');
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    panes.forEach((p) => fitPane(p));
+    saveConfig();
+  };
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    app.classList.add('resizing');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+  // Double-click the handle to reset to the default width.
+  resizer.addEventListener('dblclick', () => {
+    config.layout.sidebarWidth = SIDEBAR_DEFAULT;
+    applySidebar();
+    saveConfig();
+  });
+}
+
 function toast(msg, kind = 'good') {
   const t = $('#toast');
   t.textContent = msg;
@@ -968,6 +1037,11 @@ function toast(msg, kind = 'good') {
 function wireUI() {
   $('#btn-new').addEventListener('click', () => openDialog());
   $('#empty-new').addEventListener('click', () => openDialog());
+
+  // Sidebar collapse / expand + drag-to-resize
+  initSidebarResize();
+  $('#collapse-btn').addEventListener('click', () => setSidebarCollapsed(true));
+  $('#sidebar-expand').addEventListener('click', () => setSidebarCollapsed(false));
 
   // Config menu
   const menu = $('#config-menu');
@@ -1010,6 +1084,16 @@ function wireUI() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !$('#dialog-backdrop').classList.contains('hidden'))
       closeDialog();
+    // Ctrl+B toggles the sidebar — but only when a terminal/field isn't focused,
+    // so we never steal Ctrl+B from the shell or Claude. Use the « / ☰ buttons
+    // while working inside a pane.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
+      const inField = /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || '');
+      if (!inField) {
+        e.preventDefault();
+        setSidebarCollapsed(!config.layout.sidebarCollapsed);
+      }
+    }
   });
 
   // Refit terminals when the window resizes.
