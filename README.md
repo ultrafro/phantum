@@ -2,6 +2,12 @@
 
 **A dashboard for managing all your Claude Code terminals on one screen.**
 
+[![GitHub stars](https://img.shields.io/github/stars/ultrafro/phantum?style=social)](https://github.com/ultrafro/phantum/stargazers)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](#)
+
+![phantum managing several Claude Code sessions side by side](docs/screenshot.png)
+
 phantum runs a small local server on your PC and gives you a browser-based
 control panel: a list of your terminals ("chats") on the left, and as many live
 terminal panes as you want tiled on the right. Click a chat to open it as a
@@ -11,7 +17,7 @@ restart.
 
 Each pane is a **real Windows terminal** (ConPTY via `node-pty`), so everything
 Claude Code needs works — colors, interactive prompts, resizing, and
-**clipboard image paste** (see [below](#does-image-paste-alt--v-work)).
+**clipboard image paste** (see [below](#does-image-paste-ctrl--v-work)).
 
 > Built for Windows, but the server runs anywhere Node does.
 
