@@ -4,3 +4,4 @@ phantum.config.json.tmp
 *.log
 .DS_Store
 Thumbs.db
+phantum.config.backup*.json
