@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>phantum</title>
+    <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%BB%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header id="sidebar-head">
+          <div class="brand">
+            <span class="brand-mark">👻</span>
+            <span class="brand-name">phantum</span>
+          </div>
+          <div class="brand-sub">terminal manager</div>
+        </header>
+
+        <div id="toolbar">
+          <button id="btn-new" class="btn btn-primary" title="New terminal">
+            ＋ New
+          </button>
+          <div class="toolbar-menu">
+            <button id="btn-config" class="btn" title="Config">⚙ Config</button>
+            <div id="config-menu" class="menu hidden">
+              <button data-action="save-config">💾 Save config as…</button>
+              <button data-action="export-config">⬆ Export JSON</button>
+              <button data-action="import-config">⬇ Load / import JSON</button>
+              <hr />
+              <button data-action="close-all">✕ Close all panes</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="chat-list"></div>
+
+        <footer id="sidebar-foot">
+          <div id="layout-controls">
+            <span class="lbl">Columns</span>
+            <div class="seg">
+              <button data-cols="auto" class="seg-btn active">Auto</button>
+              <button data-cols="1" class="seg-btn">1</button>
+              <button data-cols="2" class="seg-btn">2</button>
+              <button data-cols="3" class="seg-btn">3</button>
+            </div>
+          </div>
+          <div id="config-path" class="muted"></div>
+        </footer>
+      </aside>
+
+      <main id="stage">
+        <div id="panes"></div>
+        <div id="empty-state" class="hidden">
+          <div class="empty-inner">
+            <div class="empty-ghost">👻</div>
+            <h2>No panes open</h2>
+            <p>
+              Click a terminal in the left column to open it as a live pane.
+              Open as many as you like — they tile automatically.
+            </p>
+            <button id="empty-new" class="btn btn-primary">＋ New terminal</button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- New / edit chat dialog -->
+    <div id="dialog-backdrop" class="hidden">
+      <div id="chat-dialog" class="dialog">
+        <h3 id="dialog-title">New terminal</h3>
+
+        <label class="field">
+          <span>Name</span>
+          <input id="f-name" type="text" placeholder="e.g. phantum" />
+        </label>
+
+        <label class="field">
+          <span>Working directory</span>
+          <div class="cwd-row">
+            <input id="f-cwd" type="text" placeholder="C:\\path\\to\\project" />
+            <button id="f-browse" class="btn" type="button">Browse…</button>
+          </div>
+        </label>
+
+        <div id="browser" class="hidden">
+          <div id="browser-path" class="muted"></div>
+          <div id="browser-list"></div>
+        </div>
+
+        <label class="field">
+          <span>Command</span>
+          <select id="f-shell">
+            <option value="claude">claude — Claude Code</option>
+            <option value="pwsh">pwsh — PowerShell 7</option>
+            <option value="powershell">powershell — Windows PowerShell</option>
+            <option value="cmd">cmd — Command Prompt</option>
+            <option value="bash">bash — Git Bash</option>
+            <option value="__custom">custom executable…</option>
+          </select>
+        </label>
+
+        <label class="field hidden" id="custom-field">
+          <span>Custom executable</span>
+          <input id="f-custom" type="text" placeholder="e.g. node, wsl, C:\\tool.exe" />
+        </label>
+
+        <div id="claude-flags" class="field">
+          <span>Claude flags</span>
+          <div class="flags">
+            <label class="flag">
+              <input type="checkbox" data-flag="--dangerously-skip-permissions" />
+              <span>--dangerously-skip-permissions</span>
+            </label>
+            <label class="flag">
+              <input type="checkbox" data-flag="--continue" />
+              <span>--continue (resume last)</span>
+            </label>
+            <label class="flag flag-model">
+              <input type="checkbox" data-flag="--model" data-value-from="f-model" />
+              <span>--model</span>
+              <input id="f-model" type="text" placeholder="opus / sonnet / haiku" />
+            </label>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Extra arguments <em class="muted">(space-separated)</em></span>
+          <input id="f-args" type="text" placeholder="--verbose --add-dir C:\\other" />
+        </label>
+
+        <div class="dialog-actions">
+          <button id="dialog-cancel" class="btn">Cancel</button>
+          <button id="dialog-save" class="btn btn-primary">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden file input for importing a config -->
+    <input id="import-file" type="file" accept="application/json,.json" hidden />
+
+    <div id="toast" class="hidden"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "chats": [
+    {
+      "id": "example1",
+      "name": "phantum",
+      "cwd": "C:\\side\\phantum",
+      "shell": "claude",
+      "args": ["--dangerously-skip-permissions"],
+      "createdAt": 0,
+      "lastAccessed": 0
+    },
+    {
+      "id": "example2",
+      "name": "notes",
+      "cwd": "C:\\Users\\me\\notes",
+      "shell": "claude",
+      "args": ["--continue"],
+      "createdAt": 0,
+      "lastAccessed": 0
+    },
+    {
+      "id": "example3",
+      "name": "shell",
+      "cwd": "C:\\Users\\me",
+      "shell": "pwsh",
+      "args": [],
+      "createdAt": 0,
+      "lastAccessed": 0
+    }
+  ],
+  "layout": {
+    "openChatIds": ["example1", "example3"],
+    "columns": "auto",
+    "focusedChatId": "example1"
+  },
+  "settings": {
+    "defaultShell": "claude",
+    "defaultCwd": "C:\\side"
+  }
+}
