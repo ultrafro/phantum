@@ -66,6 +66,20 @@ npm start
 `phantum.bat` does the same thing but keeps the server log visible in a console
 window.
 
+### Desktop shortcut with an icon
+
+To drop a nicely-iconed **phantum** shortcut on your desktop (handles OneDrive
+desktop redirection automatically):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\make-shortcut.ps1
+```
+
+That points a `phantum.lnk` at `phantum.vbs` and gives it `phantum.ico` (the
+ghost mark). Re-generate the icon anytime with
+`scripts\make-icon.ps1`. Add `-AllDesktops` to place it on both the OneDrive and
+classic desktop folders.
+
 ---
 
 ## Using it
