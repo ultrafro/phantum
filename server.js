@@ -66,11 +66,15 @@ app.get('/api/config', (req, res) => {
 });
 
 // Replace the whole config (used for autosave of layout, and for "load config").
-app.put('/api/config', (req, res) => {
+// POST is accepted too so the browser can flush via navigator.sendBeacon() on
+// page hide / shutdown (beacons are always POST).
+function replaceConfig(req, res) {
   config = store.normalize(req.body);
   persist();
   res.json(withStatus(config));
-});
+}
+app.put('/api/config', replaceConfig);
+app.post('/api/config', replaceConfig);
 
 // Download the current config as a portable JSON file.
 app.get('/api/config/export', (req, res) => {

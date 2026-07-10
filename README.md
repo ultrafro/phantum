@@ -26,13 +26,18 @@ Claude Code needs works — colors, interactive prompts, resizing, and
 - **Real terminals** — full ConPTY fidelity; run `claude`, PowerShell, cmd,
   Git Bash, or any executable.
 - **Per-chat commands & flags** — pick a shell and toggle common Claude flags
-  like `--dangerously-skip-permissions`, `--continue`, and `--model`, or add
-  any extra arguments.
+  like `--dangerously-skip-permissions`, `--continue`, `--model`, and
+  `--resume <session-id>` (resume a specific past conversation), or add any
+  extra arguments.
+- **Rename in one gesture** — double-click a chat's name in the sidebar (or a
+  pane's title) to rename it inline; Enter saves, Esc cancels.
 - **Sessions survive reloads** — closing a pane keeps its process running on
   the server; reopen it to pick up right where you left off. (A full app
   restart starts fresh terminals — old processes don't outlive the server.)
-- **Autosave** — layout, open panes, columns, and chat configs persist to
-  `phantum.config.json` continuously.
+- **Reopens to your last setup** — layout, open panes, columns, focus, and chat
+  configs autosave to `phantum.config.json` continuously, with a localStorage
+  backup and a flush-on-close, so after a computer restart phantum comes right
+  back up exactly as you left it.
 - **Save / share / load configs** — export your whole setup as JSON, hand it to
   a teammate, and load theirs.
 - **Double-click to run** — no build step.
@@ -88,7 +93,8 @@ classic desktop folders.
 | --- | --- |
 | New terminal | **＋ New** — set name, folder, command, and flags |
 | Open / close a pane | Click a chat in the sidebar |
-| Edit a chat | Hover the chat → ✎ |
+| Rename a chat | **Double-click** its name (sidebar or pane header) |
+| Edit a chat (dir/command/flags) | Hover the chat → ✎ |
 | Restart a terminal | Hover the chat or pane → ⟳ |
 | Delete a chat | Hover the chat → 🗑 |
 | Change layout | **Columns** control at the bottom-left |

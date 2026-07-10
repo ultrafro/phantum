@@ -39,12 +39,38 @@ const THEME = {
 // Config persistence
 // ---------------------------------------------------------------------------
 
+// The server's phantum.config.json is the source of truth, but we also mirror
+// every save into localStorage as a per-browser backup. If the server file is
+// ever lost (moved folder, wiped file) the browser can restore the last setup.
+const LS_KEY = 'phantum:config:v1';
+
+function mirrorLocal() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(config));
+  } catch (_) {}
+}
+
 async function loadConfig() {
   const res = await fetch('/api/config');
   const data = await res.json();
   runtime = data.runtime;
   delete data.runtime;
   config = data;
+
+  // Recovery: server came up empty but the browser remembers a setup -> restore
+  // it and push it back to the server file. (Every mutation mirrors to
+  // localStorage, so a genuine "delete all" also empties the mirror — this only
+  // fires when the config file itself was lost.)
+  if (!config.chats.length) {
+    try {
+      const local = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+      if (local && Array.isArray(local.chats) && local.chats.length) {
+        config = local;
+        await saveConfigNow();
+      }
+    } catch (_) {}
+  }
+  mirrorLocal();
 }
 
 let saveTimer = null;
@@ -54,6 +80,7 @@ let savePromise = Promise.resolve();
 function saveConfig() {
   return new Promise((resolve) => {
     if (saveTimer) clearTimeout(saveTimer);
+    mirrorLocal();
     saveTimer = setTimeout(async () => {
       saveTimer = null;
       savePromise = fetch('/api/config', {
@@ -78,6 +105,7 @@ async function saveConfigNow() {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
+  mirrorLocal();
   const res = await fetch('/api/config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -144,16 +172,32 @@ function renderSidebar() {
           <button class="icon-btn" data-act="delete" title="Delete">🗑</button>
         </span>
       </div>`;
-    el.querySelector('.chat-name').textContent = chat.name;
+    const nameEl = el.querySelector('.chat-name');
+    nameEl.textContent = chat.name;
+    nameEl.title = 'Double-click to rename';
     el.querySelector('.chat-cmd').textContent = cmdLabel;
     el.querySelector('.chat-dir').textContent = chat.cwd;
 
+    let clickTimer = null;
     el.addEventListener('click', (e) => {
       const act = e.target.dataset.act;
       if (act === 'edit') return openDialog(chat);
       if (act === 'delete') return deleteChat(chat.id);
       if (act === 'restart') return restartTerminal(chat.id);
+      // Clicking the name: wait a beat to distinguish from a double-click
+      // (which opens inline rename). Clicking anywhere else opens immediately.
+      if (e.target === nameEl) {
+        if (nameEl.querySelector('input') || e.detail > 1) return;
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => togglePane(chat.id), 200);
+        return;
+      }
       togglePane(chat.id);
+    });
+    nameEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      clearTimeout(clickTimer);
+      inlineRename(chat, nameEl);
     });
     list.appendChild(el);
   }
@@ -167,6 +211,46 @@ function shellLabel(chat) {
   if (s === 'cmd') return 'cmd';
   if (s === 'bash') return 'bash';
   return s.split(/[\\/]/).pop();
+}
+
+// Turn a name element (sidebar name or pane title) into an inline text field.
+// Enter/blur commits, Escape cancels. This is the "really easy" rename path;
+// the ✎ button still opens the full edit dialog for dir/command/flags.
+function inlineRename(chat, el) {
+  if (el.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'rename-input';
+  input.value = chat.name;
+  el.textContent = '';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const val = input.value.trim();
+    if (save && val) {
+      chat.name = val;
+      chat.lastAccessed = Date.now();
+      saveConfig();
+    }
+    const pane = panes.get(chat.id);
+    if (pane) pane.el.querySelector('.pane-title').textContent = chat.name;
+    renderSidebar();
+  };
+
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  ['click', 'mousedown', 'dblclick'].forEach((ev) =>
+    input.addEventListener(ev, (e) => e.stopPropagation())
+  );
 }
 
 function refreshChatMeta() {
@@ -251,7 +335,13 @@ async function openPane(chatId) {
       </span>
     </div>
     <div class="pane-body"></div>`;
-  el.querySelector('.pane-title').textContent = chat.name;
+  const titleEl = el.querySelector('.pane-title');
+  titleEl.textContent = chat.name;
+  titleEl.title = 'Double-click to rename';
+  titleEl.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    inlineRename(chat, titleEl);
+  });
   el.querySelector('.pane-dir').textContent = chat.cwd;
   $('#panes').appendChild(el);
 
@@ -538,6 +628,7 @@ function openDialog(chat = null) {
   // Reset flags, then hydrate from existing args.
   $$('#claude-flags input[type=checkbox]').forEach((c) => (c.checked = false));
   $('#f-model').value = '';
+  $('#f-resume').value = '';
   const args = chat ? [...chat.args] : [];
   const extra = [];
   for (let i = 0; i < args.length; i++) {
@@ -548,6 +639,14 @@ function openDialog(chat = null) {
       setFlag('--model', true);
       $('#f-model').value = args[i + 1] || '';
       i++;
+    } else if (a === '--resume' || a === '-r') {
+      setFlag('--resume', true);
+      // The session id is the next token, unless that's another flag.
+      const next = args[i + 1];
+      if (next && !next.startsWith('-')) {
+        $('#f-resume').value = next;
+        i++;
+      }
     } else extra.push(a);
   }
   $('#f-args').value = extra.join(' ');
@@ -582,6 +681,11 @@ function collectArgs() {
       if (flag === '--model') {
         const m = $('#f-model').value.trim();
         if (m) args.push('--model', m);
+      } else if (flag === '--resume') {
+        const id = $('#f-resume').value.trim();
+        // With an id -> resume that session; without -> Claude shows a picker.
+        if (id) args.push('--resume', id);
+        else args.push('--resume');
       } else {
         args.push(flag);
       }
@@ -833,6 +937,24 @@ function wireUI() {
 
   // Refit terminals when the window resizes.
   window.addEventListener('resize', () => panes.forEach((p) => fitPane(p)));
+
+  // On close/refresh/shutdown, flush the very latest layout so reopening always
+  // lands on your last setup. sendBeacon survives page teardown; localStorage is
+  // the local backup.
+  window.addEventListener('pagehide', flushOnExit);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushOnExit();
+  });
+}
+
+function flushOnExit() {
+  try {
+    mirrorLocal();
+    const blob = new Blob([JSON.stringify(config)], {
+      type: 'application/json'
+    });
+    navigator.sendBeacon('/api/config', blob);
+  } catch (_) {}
 }
 
 async function main() {

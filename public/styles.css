@@ -215,6 +215,19 @@ button {
   padding: 1px 6px;
   border-radius: 5px;
 }
+.rename-input {
+  font: inherit;
+  font-weight: 600;
+  width: 100%;
+  min-width: 90px;
+  max-width: 220px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 1px 5px;
+  outline: none;
+}
 .chat-dir {
   font-family: var(--mono);
   font-size: 11px;
