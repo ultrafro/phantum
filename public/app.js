@@ -289,15 +289,18 @@ function updateEmptyState() {
 function applyColumns() {
   const cols = config.layout.columns || 'auto';
   const grid = $('#panes');
-  const n = config.layout.openChatIds.length;
-  let css;
+  const n = Math.max(1, config.layout.openChatIds.length);
+  let perRow;
   if (cols === 'auto') {
-    const perRow = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), 3);
-    css = `repeat(${perRow}, minmax(0, 1fr))`;
+    perRow = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), 3);
   } else {
-    css = `repeat(${Math.min(cols, Math.max(1, n))}, minmax(0, 1fr))`;
+    perRow = Math.min(cols, n);
   }
-  grid.style.gridTemplateColumns = css;
+  const rows = Math.ceil(n / perRow);
+  // The panes container is flex-wrap; per-row/rows drive each pane's flex-basis
+  // and height so a partial last row grows to fill the full width.
+  grid.style.setProperty('--per-row', perRow);
+  grid.style.setProperty('--rows', rows);
   // Give xterm a beat to settle, then refit everything.
   requestAnimationFrame(() => panes.forEach((p) => fitPane(p)));
 }
@@ -328,6 +331,7 @@ async function openPane(chatId) {
       <span class="dot ${statusOf(chatId)}"></span>
       <span class="pane-title"></span>
       <span class="pane-dir" dir="rtl"></span>
+      <span class="pane-warn hidden" title="">⚠</span>
       <span class="pane-actions">
         <button class="icon-btn" data-act="restart" title="Restart">⟳</button>
         <button class="icon-btn" data-act="clear" title="Clear">⌫</button>
@@ -363,38 +367,9 @@ async function openPane(chatId) {
   term.open(body);
   fit.fit();
 
-  const ws = new WebSocket(
-    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?chatId=${encodeURIComponent(chatId)}`
-  );
-  ws.binaryType = 'arraybuffer';
-
-  const pane = { term, fit, ws, el, resizeObs: null };
+  const pane = { term, fit, ws: null, dataDisp: null, el, resizeObs: null };
   panes.set(chatId, pane);
-
-  ws.onopen = () => {
-    sendResize(pane);
-  };
-  ws.onmessage = (ev) => {
-    let data = ev.data;
-    if (data instanceof ArrayBuffer) data = new TextDecoder().decode(data);
-    // Control messages from server are JSON with a __phantum marker.
-    if (typeof data === 'string' && data.startsWith('{"__phantum"')) {
-      try {
-        const m = JSON.parse(data);
-        if (m.__phantum === 'exit') refreshRuntime();
-        return;
-      } catch (_) {}
-    }
-    term.write(data);
-  };
-  ws.onclose = () => {
-    term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
-  };
-
-  // User keystrokes -> pty.
-  term.onData((d) => {
-    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: d }));
-  });
+  attachSocket(pane, chatId);
 
   wireKeys(term, pane, body);
 
@@ -614,42 +589,117 @@ function wireKeys(term, pane, body) {
 async function restartTerminal(chatId) {
   await fetch(`/api/chats/${chatId}/restart`, { method: 'POST' });
   toast('Terminal restarted');
-  // Reopen the socket so the pane attaches to the fresh process.
-  const wasOpen = panes.has(chatId);
-  if (wasOpen) {
-    closePaneSocketOnly(chatId);
-    setTimeout(() => reopenSocket(chatId), 150);
+  const pane = panes.get(chatId);
+  if (pane) {
+    pane.term.reset();
+    attachSocket(pane, chatId); // fresh process, fresh socket
   }
   refreshRuntime();
 }
 
-function closePaneSocketOnly(chatId) {
-  const pane = panes.get(chatId);
-  if (!pane) return;
-  try {
-    pane.ws.close();
-  } catch (_) {}
-  pane.term.reset();
-}
+// Open (or re-open) the pane's WebSocket. Tears down any previous socket and its
+// input handler first so a restart/reconnect never stacks duplicate keystroke
+// listeners (which would double every character typed).
+function attachSocket(pane, chatId) {
+  if (pane.dataDisp) {
+    try {
+      pane.dataDisp.dispose();
+    } catch (_) {}
+    pane.dataDisp = null;
+  }
+  if (pane.ws) {
+    try {
+      pane.ws.onclose = null;
+      pane.ws.close();
+    } catch (_) {}
+  }
 
-function reopenSocket(chatId) {
-  const pane = panes.get(chatId);
-  if (!pane) return;
   const ws = new WebSocket(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?chatId=${encodeURIComponent(chatId)}`
   );
   ws.binaryType = 'arraybuffer';
   pane.ws = ws;
-  ws.onopen = () => sendResize(pane);
+
+  ws.onopen = () => {
+    setConn(true);
+    sendResize(pane);
+  };
   ws.onmessage = (ev) => {
     let data = ev.data;
     if (data instanceof ArrayBuffer) data = new TextDecoder().decode(data);
-    if (typeof data === 'string' && data.startsWith('{"__phantum"')) return;
+    // Control messages from server are JSON with a __phantum marker.
+    if (typeof data === 'string' && data.startsWith('{"__phantum"')) {
+      try {
+        const m = JSON.parse(data);
+        if (m.__phantum === 'exit') refreshRuntime();
+        return;
+      } catch (_) {}
+    }
     pane.term.write(data);
   };
-  pane.term.onData((d) => {
+  ws.onclose = () => {
+    // Ignore sockets we tore down on purpose (pane closed / reattached).
+    if (!panes.has(chatId) || panes.get(chatId).ws !== ws) return;
+    pane.term.write('\r\n\x1b[90m[disconnected — use Reconnect]\x1b[0m\r\n');
+    setTimeout(refreshRuntime, 200); // let the poll decide server vs pane
+  };
+  ws.onerror = () => setTimeout(refreshRuntime, 200);
+
+  pane.dataDisp = pane.term.onData((d) => {
     if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: d }));
   });
+}
+
+// ---- server connection status + manual reconnect ----
+let serverUp = true;
+
+function setConn(up) {
+  if (up === serverUp && $('#conn')) {
+    // still keep the label fresh on first paint
+  }
+  serverUp = up;
+  const el = $('#conn');
+  if (!el) return;
+  el.classList.toggle('ok', up);
+  el.classList.toggle('down', !up);
+  el.querySelector('.conn-label').textContent = up
+    ? 'connected'
+    : 'disconnected';
+}
+
+async function reconnectAll() {
+  toast('Reconnecting…');
+  let ok = false;
+  try {
+    const res = await fetch('/api/status', { cache: 'no-store' });
+    ok = res.ok;
+  } catch (_) {
+    ok = false;
+  }
+  setConn(ok);
+  if (!ok) {
+    toast('Server still unreachable', 'bad');
+    return;
+  }
+  // Reattach any pane whose socket has dropped (CLOSING/CLOSED).
+  for (const [chatId, pane] of panes) {
+    const st = pane.ws ? pane.ws.readyState : 3;
+    if (st === 2 || st === 3) attachSocket(pane, chatId);
+  }
+  await refreshRuntime();
+  toast('Reconnected');
+}
+
+// Flag panes whose resume was repaired/redirected/failed (from the status API).
+function updatePaneWarnings() {
+  const info = (runtime && runtime.info) || {};
+  for (const [chatId, pane] of panes) {
+    const badge = pane.el.querySelector('.pane-warn');
+    if (!badge) continue;
+    const w = info[chatId] && info[chatId].warning;
+    badge.classList.toggle('hidden', !w);
+    badge.title = w || '';
+  }
 }
 
 async function deleteChat(chatId) {
@@ -826,6 +876,30 @@ async function saveDialog() {
 }
 
 // ---- folder browser ----
+// Primary path: ask the server to pop the real Windows folder dialog. Falls back
+// to the in-app tree browser on non-Windows or if the dialog can't open.
+async function pickFolderNative() {
+  const start = $('#f-cwd').value.trim();
+  try {
+    const res = await fetch('/api/pick-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start })
+    });
+    if (res.status === 501) return onBrowseToggle(); // non-Windows
+    const data = await res.json();
+    if (data.path) {
+      $('#f-cwd').value = data.path;
+      onBrowseToggle(false);
+    } else if (data.error) {
+      onBrowseToggle(); // dialog failed — use the in-app browser
+    }
+    // canceled -> leave the field untouched
+  } catch (_) {
+    onBrowseToggle();
+  }
+}
+
 let browserDir = null;
 async function onBrowseToggle(show) {
   const box = $('#browser');
@@ -950,11 +1024,18 @@ async function bootFromConfig() {
 
 async function refreshRuntime() {
   try {
-    const res = await fetch('/api/status');
+    const res = await fetch('/api/status', { cache: 'no-store' });
     const data = await res.json();
-    if (runtime) runtime.status = data.status;
+    if (runtime) {
+      runtime.status = data.status;
+      runtime.info = data.info;
+    }
+    setConn(true);
     refreshChatMeta();
-  } catch (_) {}
+    updatePaneWarnings();
+  } catch (_) {
+    setConn(false);
+  }
 }
 
 function setColumnsUI(cols) {
@@ -1075,7 +1156,8 @@ function wireUI() {
   $('#dialog-save').addEventListener('click', saveDialog);
   $('#f-shell').addEventListener('change', onShellChange);
   $('#f-resume').addEventListener('change', detectResumeCwd);
-  $('#f-browse').addEventListener('click', () => onBrowseToggle());
+  $('#f-browse').addEventListener('click', () => pickFolderNative());
+  $('#conn-reconnect').addEventListener('click', () => reconnectAll());
   $('#dialog-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'dialog-backdrop') closeDialog();
   });

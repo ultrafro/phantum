@@ -12,7 +12,9 @@ const { WebSocketServer } = require('ws');
 const store = require('./lib/store');
 const { TerminalManager } = require('./lib/terminals');
 
-const PORT = Number(process.env.PORT || process.env.PHANTUM_PORT || 7333);
+// High, uncommon default port — the old 7333 collided with other local Claude
+// instances that grab/drop it. Override with PORT / PHANTUM_PORT if needed.
+const PORT = Number(process.env.PORT || process.env.PHANTUM_PORT || 59333);
 const HOST = process.env.PHANTUM_HOST || '127.0.0.1';
 
 const app = express();
@@ -46,11 +48,11 @@ function persist() {
 }
 
 function withStatus(cfg) {
-  const status = manager.statusMap();
   return {
     ...cfg,
     runtime: {
-      status,
+      status: manager.statusMap(),
+      info: manager.infoMap(),
       configPath: store.CONFIG_PATH,
       platform: process.platform,
       homedir: os.homedir()
@@ -165,7 +167,49 @@ app.get('/api/fs', (req, res) => {
 });
 
 app.get('/api/status', (req, res) => {
-  res.json({ status: manager.statusMap() });
+  res.json({ status: manager.statusMap(), info: manager.infoMap() });
+});
+
+// Native OS folder picker. The browser can't open a real Explorer dialog, but
+// the server runs on the user's own desktop, so it shells out to the Windows
+// folder-browser dialog and returns the chosen path. Falls back gracefully on
+// non-Windows (the in-app browser handles those).
+app.post('/api/pick-folder', (req, res) => {
+  if (process.platform !== 'win32') {
+    return res.status(501).json({ error: 'native picker is Windows-only' });
+  }
+  const start = String((req.body && req.body.start) || '').replace(/'/g, "''");
+  // Classic FolderBrowserDialog — on Win10/11 .NET auto-upgrades it to the modern
+  // Explorer-style chooser. A hidden TopMost owner keeps it above the browser.
+  const ps = `
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.Opacity = 0
+$owner.Show() | Out-Null
+$dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+$dlg.Description = 'phantum — select working directory'
+$dlg.ShowNewFolderButton = $true
+$sp = '${start}'
+if ($sp -and (Test-Path -LiteralPath $sp)) { $dlg.SelectedPath = $sp }
+$r = $dlg.ShowDialog($owner)
+$owner.Close()
+if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dlg.SelectedPath) }
+`;
+  const b64 = Buffer.from(ps, 'utf16le').toString('base64');
+  const child = require('child_process').execFile(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', b64],
+    { timeout: 5 * 60 * 1000, windowsHide: true },
+    (err, stdout) => {
+      const picked = (stdout || '').trim();
+      if (picked) return res.json({ path: picked });
+      if (err && err.killed) return res.json({ canceled: true, error: 'timed out' });
+      res.json({ canceled: true });
+    }
+  );
+  child.on('error', (e) => {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  });
 });
 
 // Look up which directory a Claude Code session belongs to. `claude --resume

@@ -12,7 +12,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 
 here = fso.GetParentFolderName(WScript.ScriptFullName)
-port = "7333"
+port = "59333"
 url = "http://127.0.0.1:" & port
 
 shell.CurrentDirectory = here
