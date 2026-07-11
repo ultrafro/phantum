@@ -16,7 +16,7 @@ if not exist "node_modules" (
   call npm install
 )
 
-if "%PORT%"=="" set PORT=7333
+if "%PORT%"=="" set PORT=59333
 
 start "" "http://127.0.0.1:%PORT%"
 echo.

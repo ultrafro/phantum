@@ -397,14 +397,23 @@ button {
 }
 #panes {
   height: 100vh;
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: var(--pane-gap);
   padding: 8px;
-  grid-auto-rows: 1fr;
+  --pane-gap: 8px;
+  --per-row: 1;
+  --rows: 1;
 }
 .pane {
   display: flex;
   flex-direction: column;
+  /* Basis is one column, so panes wrap at --per-row; flex-grow lets a partial
+     last row expand to fill the remaining width instead of leaving a gap. */
+  flex: 1 1 calc((100% - (var(--per-row) - 1) * var(--pane-gap)) / var(--per-row));
+  min-width: 0;
+  height: calc((100% - (var(--rows) - 1) * var(--pane-gap)) / var(--rows));
   background: #000;
   border: 1px solid var(--border-2);
   border-radius: 10px;
@@ -456,6 +465,70 @@ button {
 }
 .pane-body .xterm {
   height: 100%;
+}
+
+/* resume / working-dir warning badge in a pane header */
+.pane-warn {
+  color: var(--yellow, #ffcf5c);
+  font-size: 13px;
+  cursor: help;
+  flex: none;
+}
+
+/* ---- server connection status (top-right of the stage) ---- */
+#conn {
+  position: absolute;
+  bottom: 12px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px 5px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border-2);
+  backdrop-filter: blur(6px);
+  color: var(--text-dim);
+  user-select: none;
+}
+#conn .conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green, #3fdd8a);
+  box-shadow: 0 0 6px currentColor;
+}
+#conn.ok .conn-dot {
+  color: var(--green, #3fdd8a);
+}
+#conn.down {
+  color: var(--red, #ff6b6b);
+  border-color: var(--red, #ff6b6b);
+}
+#conn.down .conn-dot {
+  background: var(--red, #ff6b6b);
+  color: var(--red, #ff6b6b);
+}
+#conn-reconnect {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+#conn-reconnect:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+#conn.ok #conn-reconnect {
+  opacity: 0.5;
+}
+#conn.down #conn-reconnect {
+  opacity: 1;
 }
 
 /* ---- empty state ---- */

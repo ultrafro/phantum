@@ -73,7 +73,7 @@ To stop the background server, double-click **`stop-phantum.vbs`**.
 ```bash
 npm install
 npm start
-# then open http://127.0.0.1:7333
+# then open http://127.0.0.1:59333
 ```
 
 `phantum.bat` does the same thing but keeps the server log visible in a console
@@ -157,7 +157,7 @@ any executable name/path. `args` is passed to it verbatim.
 
 | Var | Default | Purpose |
 | --- | --- | --- |
-| `PORT` / `PHANTUM_PORT` | `7333` | Server port |
+| `PORT` / `PHANTUM_PORT` | `59333` | Server port |
 | `PHANTUM_HOST` | `127.0.0.1` | Bind address |
 | `PHANTUM_CONFIG` | `./phantum.config.json` | Config file path |
 
