@@ -72,7 +72,8 @@ Function PortOpen(p)
 End Function
 
 Sub OpenApp(u)
-  Dim edge, chrome, pf, pfx86, la
+  Dim edge, chrome, pf, pfx86, la, q, udd, flags
+  q = Chr(34)
   pf = shell.ExpandEnvironmentStrings("%ProgramFiles%")
   pfx86 = shell.ExpandEnvironmentStrings("%ProgramFiles(x86)%")
   la = shell.ExpandEnvironmentStrings("%LocalAppData%")
@@ -84,11 +85,19 @@ Sub OpenApp(u)
   If Not fso.FileExists(chrome) Then chrome = pfx86 & "\Google\Chrome\Application\chrome.exe"
   If Not fso.FileExists(chrome) Then chrome = la & "\Google\Chrome\Application\chrome.exe"
 
+  ' Give the app window its OWN browser profile. Without this, an --app window
+  ' groups under the main browser and shows the browser's taskbar icon; a
+  ' dedicated --user-data-dir makes it a standalone app that uses phantum's own
+  ' favicon (the ghost). --no-first-run stops the fresh profile from nagging.
+  udd = la & "\phantum\AppWindow"
+  flags = " --app=" & u & " --user-data-dir=" & q & udd & q & _
+          " --no-first-run --no-default-browser-check --window-size=1400,900"
+
   If fso.FileExists(edge) Then
-    shell.Run """" & edge & """ --app=" & u & " --window-size=1400,900", 1, False
+    shell.Run q & edge & q & flags, 1, False
   ElseIf fso.FileExists(chrome) Then
-    shell.Run """" & chrome & """ --app=" & u & " --window-size=1400,900", 1, False
+    shell.Run q & chrome & q & flags, 1, False
   Else
-    shell.Run u, 1, False ' fall back to default browser
+    shell.Run u, 1, False ' fall back to default browser (no custom icon possible)
   End If
 End Sub
