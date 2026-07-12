@@ -72,11 +72,22 @@ Function PortOpen(p)
 End Function
 
 Sub OpenApp(u)
-  Dim edge, chrome, pf, pfx86, la, q, udd, flags
+  Dim edge, chrome, pf, pfx86, la, q, udd, flags, appLnk
   q = Chr(34)
   pf = shell.ExpandEnvironmentStrings("%ProgramFiles%")
   pfx86 = shell.ExpandEnvironmentStrings("%ProgramFiles(x86)%")
   la = shell.ExpandEnvironmentStrings("%LocalAppData%")
+
+  ' Prefer an *installed* phantum app if one exists. Installing the site as an
+  ' app (browser menu > Apps > Install phantum) is the only thing that reliably
+  ' gives the taskbar the ghost icon — a plain --app window always borrows the
+  ' browser's own icon. Once installed, we launch that shortcut so the server is
+  ' running AND the icon is correct.
+  appLnk = FindInstalledApp()
+  If appLnk <> "" Then
+    shell.Run q & appLnk & q, 1, False
+    Exit Sub
+  End If
 
   edge = pfx86 & "\Microsoft\Edge\Application\msedge.exe"
   If Not fso.FileExists(edge) Then edge = pf & "\Microsoft\Edge\Application\msedge.exe"
@@ -85,10 +96,9 @@ Sub OpenApp(u)
   If Not fso.FileExists(chrome) Then chrome = pfx86 & "\Google\Chrome\Application\chrome.exe"
   If Not fso.FileExists(chrome) Then chrome = la & "\Google\Chrome\Application\chrome.exe"
 
-  ' Give the app window its OWN browser profile. Without this, an --app window
-  ' groups under the main browser and shows the browser's taskbar icon; a
-  ' dedicated --user-data-dir makes it a standalone app that uses phantum's own
-  ' favicon (the ghost). --no-first-run stops the fresh profile from nagging.
+  ' Not installed yet: open a standalone app window in its own profile. The
+  ' window content is phantum, but the taskbar icon stays the browser's until
+  ' you install it as an app (see above).
   udd = la & "\phantum\AppWindow"
   flags = " --app=" & u & " --user-data-dir=" & q & udd & q & _
           " --no-first-run --no-default-browser-check --window-size=1400,900"
@@ -101,3 +111,27 @@ Sub OpenApp(u)
     shell.Run u, 1, False ' fall back to default browser (no custom icon possible)
   End If
 End Sub
+
+' Look for a phantum app installed via the browser (Apps > Install). Edge/Chrome
+' drop a shortcut in the Start Menu Programs folder named after the app.
+Function FindInstalledApp()
+  FindInstalledApp = ""
+  Dim bases, base, f
+  bases = Array( _
+    shell.ExpandEnvironmentStrings("%APPDATA%") & "\Microsoft\Windows\Start Menu\Programs", _
+    shell.ExpandEnvironmentStrings("%ProgramData%") & "\Microsoft\Windows\Start Menu\Programs")
+  Dim i
+  For i = 0 To UBound(bases)
+    base = bases(i)
+    If fso.FolderExists(base) Then
+      For Each f In fso.GetFolder(base).Files
+        If LCase(fso.GetExtensionName(f.Name)) = "lnk" Then
+          If InStr(LCase(f.Name), "phantum") > 0 Then
+            FindInstalledApp = f.Path
+            Exit Function
+          End If
+        End If
+      Next
+    End If
+  Next
+End Function
