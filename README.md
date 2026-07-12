@@ -1,12 +1,16 @@
 # 👻 phantum
 
-**A dashboard for managing all your Claude Code terminals on one screen.**
+**A dashboard for managing Claude Code, Codex, and other terminals on one screen.**
 
 [![GitHub stars](https://img.shields.io/github/stars/ultrafro/phantum?style=social)](https://github.com/ultrafro/phantum/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](#)
 
-![phantum managing several Claude Code sessions side by side](docs/screenshot.png)
+<video src="https://github.com/ultrafro/phantum/raw/main/docs/phantum-demo.webm" controls muted loop playsinline poster="https://github.com/ultrafro/phantum/raw/main/docs/screenshot.png" width="100%">
+  Your browser can't play this video — <a href="docs/phantum-demo.webm">download the demo</a>.
+</video>
+
+> If the video above doesn't play, watch [docs/phantum-demo.webm](docs/phantum-demo.webm) · [marketing cut](docs/phantum-marketing.webm) · or see the [screenshot](docs/screenshot.png).
 
 phantum runs a small local server on your PC and gives you a browser-based
 control panel: a list of your terminals ("chats") on the left, and as many live
@@ -28,15 +32,17 @@ Claude Code needs works — colors, interactive prompts, resizing, and
 - **Sidebar of chats** — name, working directory, launch command, live
   running/stopped status, and "last accessed" for each.
 - **Open many panes at once** — click chats to tile them; auto-layout or pick
-  1/2/3 columns.
-- **Real terminals** — full ConPTY fidelity; run `claude`, PowerShell, cmd,
-  Git Bash, or any executable.
+  1/2/3/4 columns.
+- **Real terminals** — full ConPTY fidelity; run `claude`, `codex`,
+  PowerShell, cmd, Git Bash, or any executable.
 - **Per-chat commands & flags** — pick a shell and toggle common Claude flags
   like `--dangerously-skip-permissions`, `--continue`, `--model`, and
-  `--resume <session-id>` (resume a specific past conversation), or add any
-  extra arguments. Enter a `--resume` session id and phantum **auto-detects the
-  project directory** that session belongs to and fills it in — otherwise
-  `claude --resume` can't find it.
+  `--resume <session-id>`, or Codex flags like `--yolo`, `--model`,
+  `--profile`, `--sandbox`, `--ask-for-approval`, and `--search`. You can also
+  pin any command as the default selection for new chats. Enter a Claude
+  `--resume` session id and phantum **auto-detects the project directory** that
+  session belongs to and fills it in — otherwise `claude --resume` can't find
+  it.
 - **Rename in one gesture** — double-click a chat's name in the sidebar (or a
   pane's title) to rename it inline; Enter saves, Esc cancels.
 - **Sessions survive reloads** — closing a pane keeps its process running on
@@ -55,8 +61,8 @@ Claude Code needs works — colors, interactive prompts, resizing, and
 ## Quick start
 
 **Requirements:** [Node.js](https://nodejs.org) 18+ installed. (For the
-`claude` command to work in a pane, the [Claude Code
-CLI](https://docs.claude.com/en/docs/claude-code) must be on your PATH.)
+`claude` or `codex` commands to work in panes, their CLIs must be on your
+PATH.)
 
 ### The easy way (Windows)
 
@@ -159,8 +165,8 @@ location with the `PHANTUM_CONFIG` env var). It's plain JSON — see
 }
 ```
 
-`shell` accepts the shortcuts `claude`, `pwsh`, `powershell`, `cmd`, `bash`, or
-any executable name/path. `args` is passed to it verbatim.
+`shell` accepts the shortcuts `claude`, `codex`, `pwsh`, `powershell`, `cmd`,
+`bash`, or any executable name/path. `args` is passed to it verbatim.
 
 ### Environment variables
 
