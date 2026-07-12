@@ -43,11 +43,14 @@ function Start-Server {
 }
 
 function Open-Window {
+  # Installed PWAs land in a subfolder (e.g. "Chrome Apps\phantum.lnk"), so search
+  # recursively — otherwise we miss it and fall back to an --app window whose
+  # taskbar icon is the browser's, not the ghost.
   foreach ($b in @("$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
                    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs")) {
     if (Test-Path $b) {
-      $lnk = Get-ChildItem -Path $b -Filter '*.lnk' -ErrorAction SilentlyContinue |
-             Where-Object { $_.Name -match 'phantum' } | Select-Object -First 1
+      $lnk = Get-ChildItem -Path $b -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue |
+             Where-Object { $_.BaseName -match '^phantum' } | Select-Object -First 1
       if ($lnk) { Start-Process $lnk.FullName; return }
     }
   }

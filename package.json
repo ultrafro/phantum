@@ -1,7 +1,7 @@
 {
   "name": "phantum",
   "version": "1.0.0",
-  "description": "A dashboard to manage many Claude Code (and any shell) terminals on one screen. Click chats to open them as live terminal panes; layout and config persist across restarts.",
+  "description": "A dashboard to manage Claude Code, Codex, and other terminals on one screen. Click chats to open them as live terminal panes; layout and config persist across restarts.",
   "type": "commonjs",
   "main": "server.js",
   "bin": {

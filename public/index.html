@@ -51,6 +51,7 @@
               <button data-cols="1" class="seg-btn">1</button>
               <button data-cols="2" class="seg-btn">2</button>
               <button data-cols="3" class="seg-btn">3</button>
+              <button data-cols="4" class="seg-btn">4</button>
             </div>
           </div>
           <div id="config-path" class="muted"></div>
@@ -108,6 +109,7 @@
           <span>Command</span>
           <select id="f-shell">
             <option value="claude">claude — Claude Code</option>
+            <option value="codex">codex — OpenAI Codex</option>
             <option value="pwsh">pwsh — PowerShell 7</option>
             <option value="powershell">powershell — Windows PowerShell</option>
             <option value="cmd">cmd — Command Prompt</option>
@@ -115,6 +117,17 @@
             <option value="__custom">custom executable…</option>
           </select>
         </label>
+
+        <div class="field">
+          <span>New chat default</span>
+          <div class="flags">
+            <label class="flag">
+              <input id="f-make-default" type="checkbox" />
+              <span>Use this command as the default for new chats</span>
+            </label>
+          </div>
+          <div id="f-default-shell-note" class="muted"></div>
+        </div>
 
         <label class="field hidden" id="custom-field">
           <span>Custom executable</span>
@@ -141,6 +154,53 @@
               <input type="checkbox" data-flag="--resume" data-value-from="f-resume" />
               <span>--resume</span>
               <input id="f-resume" type="text" placeholder="session id (blank = pick from list)" />
+            </label>
+          </div>
+        </div>
+
+        <div id="codex-flags" class="field hidden">
+          <span>Codex flags</span>
+          <div class="flags">
+            <label class="flag">
+              <input id="f-codex-yolo" type="checkbox" />
+              <span>--yolo</span>
+            </label>
+            <div id="f-codex-yolo-note" class="muted hidden">
+              `--yolo` bypasses approvals, so `--ask-for-approval` is disabled.
+            </div>
+            <label class="flag">
+              <input id="f-codex-search" type="checkbox" />
+              <span>--search</span>
+            </label>
+            <label class="flag">
+              <input id="f-codex-oss" type="checkbox" />
+              <span>--oss</span>
+            </label>
+            <label class="flag flag-model">
+              <span>--model</span>
+              <input id="f-codex-model" type="text" placeholder="gpt-5 / o3 / gpt-5-codex" />
+            </label>
+            <label class="flag flag-model">
+              <span>--profile</span>
+              <input id="f-codex-profile" type="text" placeholder="profile name" />
+            </label>
+            <label class="flag flag-model">
+              <span>--sandbox</span>
+              <select id="f-codex-sandbox">
+                <option value="">default</option>
+                <option value="read-only">read-only</option>
+                <option value="workspace-write">workspace-write</option>
+                <option value="danger-full-access">danger-full-access</option>
+              </select>
+            </label>
+            <label class="flag flag-model">
+              <span>--ask-for-approval</span>
+              <select id="f-codex-approval">
+                <option value="">default</option>
+                <option value="untrusted">untrusted</option>
+                <option value="on-request">on-request</option>
+                <option value="never">never</option>
+              </select>
             </label>
           </div>
         </div>

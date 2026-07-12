@@ -1,7 +1,7 @@
 {
   "name": "phantum",
   "short_name": "phantum",
-  "description": "Claude Code terminal manager",
+  "description": "Claude Code and Codex terminal manager",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

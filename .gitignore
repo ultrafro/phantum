@@ -1,6 +1,7 @@
 node_modules/
 phantum.config.json
 phantum.config.json.tmp
+phantum.config.json.bak*
 *.log
 .DS_Store
 Thumbs.db

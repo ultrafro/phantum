@@ -6,11 +6,16 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const url = require('url');
+const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const store = require('./lib/store');
-const { TerminalManager } = require('./lib/terminals');
+const {
+  TerminalManager,
+  encodeProject,
+  latestSessionId
+} = require('./lib/terminals');
 
 // High, uncommon default port — the old 7333 collided with other local Claude
 // instances that grab/drop it. Override with PORT / PHANTUM_PORT if needed.
@@ -22,6 +27,11 @@ app.use(express.json({ limit: '4mb' }));
 
 const manager = new TerminalManager();
 let config = store.load();
+assignSessionIds();
+
+// Bumped on every whole-config replace. Clients send the rev they last saw so a
+// stale background tab can't overwrite newer changes (optimistic concurrency).
+let configRev = 1;
 
 // ---- static assets --------------------------------------------------------
 
@@ -47,6 +57,83 @@ function persist() {
   config = store.save(config);
 }
 
+// ---- Claude session-id management -----------------------------------------
+
+function isClaudeChat(chat) {
+  return (chat.shell || 'claude').toLowerCase() === 'claude';
+}
+
+function chatDirExists(cwd) {
+  try {
+    return fs.statSync(cwd).isDirectory();
+  } catch (_) {
+    return false;
+  }
+}
+
+function usesContinue(chat) {
+  return (chat.args || []).some((a) => a === '--continue' || a === '-c');
+}
+
+// An id the user already pinned via --resume/--session-id, if any.
+function explicitSessionId(chat) {
+  const a = chat.args || [];
+  for (let i = 0; i < a.length; i++) {
+    if (
+      (a[i] === '--resume' || a[i] === '-r' || a[i] === '--session-id') &&
+      a[i + 1] &&
+      !a[i + 1].startsWith('-')
+    ) {
+      return a[i + 1];
+    }
+  }
+  return null;
+}
+
+// Give a Claude chat a stable session id if it doesn't have one. Existing ids are
+// adopted from an explicit flag; a chat that is the ONLY one using its folder
+// adopts that folder's latest session (dedicated worktrees — safe); everything
+// else (shared folders, brand-new chats) gets a fresh uuid so it starts clean but
+// is deterministically resumable from then on.
+function ensureSessionId(chat, claimed, cwdCounts) {
+  if (!isClaudeChat(chat) || chat.sessionId || usesContinue(chat)) return false;
+
+  const explicit = explicitSessionId(chat);
+  if (explicit) {
+    chat.sessionId = explicit;
+    claimed.add(explicit);
+    return true;
+  }
+  let picked = null;
+  if (cwdCounts && cwdCounts[chat.cwd] === 1 && chatDirExists(chat.cwd)) {
+    const latest = latestSessionId(encodeProject(chat.cwd));
+    if (latest && !claimed.has(latest)) picked = latest;
+  }
+  chat.sessionId = picked || crypto.randomUUID();
+  claimed.add(chat.sessionId);
+  return true;
+}
+
+// Backfill session ids for every existing Claude chat at startup, so a full
+// restart resumes the same conversations instead of spawning fresh instances.
+function assignSessionIds() {
+  const cwdCounts = {};
+  for (const c of config.chats) {
+    if (isClaudeChat(c)) cwdCounts[c.cwd] = (cwdCounts[c.cwd] || 0) + 1;
+  }
+  const claimed = new Set(config.chats.map((c) => c.sessionId).filter(Boolean));
+  let changed = false;
+  // Most-recently-used chats claim first (only affects fresh-uuid outcomes;
+  // adoption is limited to unique folders so ordering can't mis-assign).
+  const order = [...config.chats].sort(
+    (a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0)
+  );
+  for (const chat of order) {
+    if (ensureSessionId(chat, claimed, cwdCounts)) changed = true;
+  }
+  if (changed) persist();
+}
+
 function withStatus(cfg) {
   return {
     ...cfg,
@@ -55,7 +142,8 @@ function withStatus(cfg) {
       info: manager.infoMap(),
       configPath: store.CONFIG_PATH,
       platform: process.platform,
-      homedir: os.homedir()
+      homedir: os.homedir(),
+      rev: configRev
     }
   };
 }
@@ -71,7 +159,23 @@ app.get('/api/config', (req, res) => {
 // POST is accepted too so the browser can flush via navigator.sendBeacon() on
 // page hide / shutdown (beacons are always POST).
 function replaceConfig(req, res) {
-  config = store.normalize(req.body);
+  const body = req.body || {};
+  const incoming = store.normalize(body);
+  const force = body._force === true;
+
+  // Guard 1: never let an automatic or stale save erase a non-empty config.
+  if (!force && config.chats.length > 0 && incoming.chats.length === 0) {
+    console.warn('[phantum] refused a config save that would erase all chats');
+    return res.status(409).json(withStatus(config));
+  }
+  // Guard 2: reject a write from a client that hadn't seen the current state (a
+  // background tab left open across changes), so it can't revert newer chats.
+  if (!force && body._baseRev != null && Number(body._baseRev) !== configRev) {
+    return res.status(409).json(withStatus(config));
+  }
+
+  config = incoming;
+  configRev++;
   persist();
   res.json(withStatus(config));
 }
@@ -97,6 +201,12 @@ app.post('/api/chats', (req, res) => {
     createdAt: Date.now(),
     lastAccessed: Date.now()
   });
+  // A new Claude chat gets its own stable session id up front (fresh, or the one
+  // the user pinned via --resume) so it's resumable after a restart. No folder
+  // adoption here — a brand-new chat should start its own conversation.
+  if (isClaudeChat(chat) && !chat.sessionId && !usesContinue(chat)) {
+    chat.sessionId = explicitSessionId(chat) || crypto.randomUUID();
+  }
   config.chats.push(chat);
   persist();
   res.json(chat);
@@ -167,7 +277,7 @@ app.get('/api/fs', (req, res) => {
 });
 
 app.get('/api/status', (req, res) => {
-  res.json({ status: manager.statusMap(), info: manager.infoMap() });
+  res.json({ status: manager.statusMap(), info: manager.infoMap(), rev: configRev });
 });
 
 // Graceful shutdown (used by the system-tray "Exit"). Localhost-only since the
@@ -189,14 +299,23 @@ app.post('/api/pick-folder', (req, res) => {
   }
   const start = String((req.body && req.body.start) || '').replace(/'/g, "''");
   // Classic FolderBrowserDialog — on Win10/11 .NET auto-upgrades it to the modern
-  // Explorer-style chooser. A hidden TopMost owner keeps it above the browser.
+  // Explorer-style chooser. The server runs in the background, so it can't grab
+  // the foreground normally (the dialog would open *behind* the app window and
+  // look like nothing happened). A TopMost owner plus the ALT-key foreground-lock
+  // bypass + SetForegroundWindow pulls the dialog to the front.
   const ps = `
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
+Add-Type -Namespace PW -Name N -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [DllImport("user32.dll")] public static extern void keybd_event(byte b, byte s, uint f, System.IntPtr e);'
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.Opacity = 0
-$owner.Show() | Out-Null
+$owner.StartPosition = 'CenterScreen'
+$owner.Size = New-Object System.Drawing.Size(1,1)
+$owner.Show(); $owner.Activate()
+[PW.N]::keybd_event(0x12,0,0,[System.IntPtr]::Zero)
+[PW.N]::keybd_event(0x12,0,2,[System.IntPtr]::Zero)
+[PW.N]::SetForegroundWindow($owner.Handle) | Out-Null
 $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-$dlg.Description = 'phantum — select working directory'
+$dlg.Description = 'phantum - select working directory'
 $dlg.ShowNewFolderButton = $true
 $sp = '${start}'
 if ($sp -and (Test-Path -LiteralPath $sp)) { $dlg.SelectedPath = $sp }
@@ -207,8 +326,8 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dlg.
   const b64 = Buffer.from(ps, 'utf16le').toString('base64');
   const child = require('child_process').execFile(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', b64],
-    { timeout: 5 * 60 * 1000, windowsHide: true },
+    ['-NoProfile', '-STA', '-EncodedCommand', b64],
+    { timeout: 3 * 60 * 1000, windowsHide: true },
     (err, stdout) => {
       const picked = (stdout || '').trim();
       if (picked) return res.json({ path: picked });
@@ -330,7 +449,7 @@ wss.on('connection', (ws, req) => {
 server.listen(PORT, HOST, () => {
   const link = `http://${HOST}:${PORT}`;
   console.log('');
-  console.log('  phantum — Claude Code terminal manager');
+  console.log('  phantum — Claude Code and Codex terminal manager');
   console.log('  ' + '-'.repeat(38));
   console.log('  open:   ' + link);
   console.log('  config: ' + store.CONFIG_PATH);

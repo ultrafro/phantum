@@ -21,6 +21,15 @@
     },
     {
       "id": "example3",
+      "name": "codex",
+      "cwd": "C:\\Users\\me\\coding",
+      "shell": "codex",
+      "args": ["--yolo", "--model", "gpt-5-codex"],
+      "createdAt": 0,
+      "lastAccessed": 0
+    },
+    {
+      "id": "example4",
       "name": "shell",
       "cwd": "C:\\Users\\me",
       "shell": "pwsh",

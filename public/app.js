@@ -7,7 +7,8 @@ import { WebLinksAddon } from '/vendor/addon-web-links/lib/addon-web-links.mjs';
 // ---------------------------------------------------------------------------
 
 let config = null; // { version, chats, layout, settings }
-let runtime = null; // { status, configPath, platform, homedir }
+let runtime = null; // { status, configPath, platform, homedir, rev }
+let serverRev = null; // last config revision this tab has seen (optimistic lock)
 const panes = new Map(); // chatId -> { term, fit, ws, el, resizeObs }
 let editingId = null; // chat id when dialog is in edit mode
 
@@ -54,6 +55,7 @@ async function loadConfig() {
   const res = await fetch('/api/config');
   const data = await res.json();
   runtime = data.runtime;
+  serverRev = runtime ? runtime.rev : null;
   delete data.runtime;
   config = data;
 
@@ -75,6 +77,36 @@ async function loadConfig() {
 
 let saveTimer = null;
 let savePromise = Promise.resolve();
+let reloading = false;
+
+// The server rejects (409) a save that would erase all chats or that comes from
+// a tab which hadn't seen newer changes. Rather than clobber, re-sync by
+// reloading — the tab adopts the current server state instead of overwriting it.
+function onConfigConflict() {
+  if (reloading) return;
+  reloading = true;
+  toast('Config changed elsewhere — reloading to stay in sync', 'bad');
+  setTimeout(() => location.reload(), 900);
+}
+
+// Single place that writes the whole config, tagged with the rev we last saw.
+async function postConfig(cfg, { force = false } = {}) {
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...cfg, _baseRev: serverRev, _force: force })
+  });
+  if (res.status === 409) {
+    onConfigConflict();
+    return;
+  }
+  const data = await res.json().catch(() => null);
+  if (data && data.runtime) {
+    runtime = data.runtime;
+    serverRev = runtime.rev;
+  }
+}
+
 // Debounced full-config save. Returns a promise that settles when the write
 // that includes the current state has been accepted by the server.
 function saveConfig() {
@@ -83,16 +115,7 @@ function saveConfig() {
     mirrorLocal();
     saveTimer = setTimeout(async () => {
       saveTimer = null;
-      savePromise = fetch('/api/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          runtime = data.runtime;
-        })
-        .catch((e) => console.error('save failed', e));
+      savePromise = postConfig(config).catch((e) => console.error('save failed', e));
       await savePromise;
       resolve();
     }, 120);
@@ -100,19 +123,13 @@ function saveConfig() {
 }
 
 // Persist immediately (no debounce) and wait for it — used before opening a ws.
-async function saveConfigNow() {
+async function saveConfigNow(opts) {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
   mirrorLocal();
-  const res = await fetch('/api/config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config)
-  });
-  const data = await res.json();
-  runtime = data.runtime;
+  await postConfig(config, opts).catch((e) => console.error('save failed', e));
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +224,7 @@ function renderSidebar() {
 function shellLabel(chat) {
   const s = (chat.shell || 'claude').toLowerCase();
   if (s === 'claude') return 'claude';
+  if (s === 'codex') return 'codex';
   if (s === 'pwsh' || s === 'powershell') return 'ps';
   if (s === 'cmd') return 'cmd';
   if (s === 'bash') return 'bash';
@@ -292,7 +310,7 @@ function applyColumns() {
   const n = Math.max(1, config.layout.openChatIds.length);
   let perRow;
   if (cols === 'auto') {
-    perRow = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), 3);
+    perRow = Math.min(Math.max(1, Math.ceil(Math.sqrt(n))), 4);
   } else {
     perRow = Math.min(cols, n);
   }
@@ -729,39 +747,30 @@ function openDialog(chat = null) {
     : config.settings.defaultCwd || runtime.homedir;
 
   const shell = chat ? chat.shell : config.settings.defaultShell || 'claude';
-  const known = ['claude', 'pwsh', 'powershell', 'cmd', 'bash'];
+  const shellKey = String(shell || '').toLowerCase();
+  const known = ['claude', 'codex', 'pwsh', 'powershell', 'cmd', 'bash'];
   const sel = $('#f-shell');
-  if (known.includes(shell)) {
-    sel.value = shell;
+  if (known.includes(shellKey)) {
+    sel.value = shellKey;
     $('#f-custom').value = '';
   } else {
     sel.value = '__custom';
     $('#f-custom').value = shell;
   }
+  $('#f-make-default').checked = false;
+  $('#f-default-shell-note').textContent =
+    `Current default: ${shellLabel({ shell: config.settings.defaultShell || 'claude' })}`;
 
-  // Reset flags, then hydrate from existing args.
-  $$('#claude-flags input[type=checkbox]').forEach((c) => (c.checked = false));
-  $('#f-model').value = '';
-  $('#f-resume').value = '';
   const args = chat ? [...chat.args] : [];
+  resetClaudeFlags();
+  resetCodexFlags();
   const extra = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === '--dangerously-skip-permissions') setFlag(a, true);
-    else if (a === '--continue' || a === '-c') setFlag('--continue', true);
-    else if (a === '--model') {
-      setFlag('--model', true);
-      $('#f-model').value = args[i + 1] || '';
-      i++;
-    } else if (a === '--resume' || a === '-r') {
-      setFlag('--resume', true);
-      // The session id is the next token, unless that's another flag.
-      const next = args[i + 1];
-      if (next && !next.startsWith('-')) {
-        $('#f-resume').value = next;
-        i++;
-      }
-    } else extra.push(a);
+  if (shellKey === 'claude') {
+    hydrateClaudeArgs(args, extra);
+  } else if (shellKey === 'codex') {
+    hydrateCodexArgs(args, extra);
+  } else {
+    extra.push(...args);
   }
   $('#f-args').value = extra.join(' ');
 
@@ -774,6 +783,80 @@ function openDialog(chat = null) {
 function setFlag(flag, val) {
   const cb = $(`#claude-flags input[data-flag="${flag}"]`);
   if (cb) cb.checked = val;
+}
+
+function resetClaudeFlags() {
+  $$('#claude-flags input[type=checkbox]').forEach((c) => (c.checked = false));
+  $('#f-model').value = '';
+  $('#f-resume').value = '';
+}
+
+function resetCodexFlags() {
+  $('#f-codex-yolo').checked = false;
+  $('#f-codex-search').checked = false;
+  $('#f-codex-oss').checked = false;
+  $('#f-codex-model').value = '';
+  $('#f-codex-profile').value = '';
+  $('#f-codex-sandbox').value = '';
+  $('#f-codex-approval').value = '';
+  syncCodexFlags();
+}
+
+function hydrateClaudeArgs(args, extra) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--dangerously-skip-permissions') setFlag(a, true);
+    else if (a === '--continue' || a === '-c') setFlag('--continue', true);
+    else if (a === '--model') {
+      setFlag('--model', true);
+      $('#f-model').value = args[i + 1] || '';
+      i++;
+    } else if (a === '--resume' || a === '-r') {
+      setFlag('--resume', true);
+      const next = args[i + 1];
+      if (next && !next.startsWith('-')) {
+        $('#f-resume').value = next;
+        i++;
+      }
+    } else extra.push(a);
+  }
+}
+
+function hydrateCodexArgs(args, extra) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--yolo' || a === '--dangerously-bypass-approvals-and-sandbox') {
+      $('#f-codex-yolo').checked = true;
+    } else if (a === '--search') {
+      $('#f-codex-search').checked = true;
+    } else if (a === '--oss') {
+      $('#f-codex-oss').checked = true;
+    } else if (a === '--model' || a === '-m') {
+      $('#f-codex-model').value = args[i + 1] || '';
+      i++;
+    } else if (a === '--profile' || a === '-p') {
+      $('#f-codex-profile').value = args[i + 1] || '';
+      i++;
+    } else if (a === '--sandbox' || a === '-s') {
+      $('#f-codex-sandbox').value = args[i + 1] || '';
+      i++;
+    } else if (a === '--ask-for-approval' || a === '-a') {
+      $('#f-codex-approval').value = args[i + 1] || '';
+      i++;
+    } else {
+      extra.push(a);
+    }
+  }
+  syncCodexFlags();
+}
+
+function syncCodexFlags() {
+  const yolo = $('#f-codex-yolo').checked;
+  const approval = $('#f-codex-approval');
+  const note = $('#f-codex-yolo-note');
+  if (yolo && approval.value) approval.value = '';
+  approval.disabled = yolo;
+  note.classList.toggle('hidden', !yolo);
 }
 
 // When a --resume session id is entered, look up the directory that session
@@ -807,6 +890,8 @@ function onShellChange() {
   const v = $('#f-shell').value;
   $('#custom-field').classList.toggle('hidden', v !== '__custom');
   $('#claude-flags').classList.toggle('hidden', v !== 'claude');
+  $('#codex-flags').classList.toggle('hidden', v !== 'codex');
+  if (v === 'codex') syncCodexFlags();
 }
 
 function collectArgs() {
@@ -826,9 +911,24 @@ function collectArgs() {
         args.push(flag);
       }
     });
+  } else if ($('#f-shell').value === 'codex') {
+    if ($('#f-codex-yolo').checked) args.push('--yolo');
+    if ($('#f-codex-search').checked) args.push('--search');
+    if ($('#f-codex-oss').checked) args.push('--oss');
+    const model = $('#f-codex-model').value.trim();
+    if (model) args.push('--model', model);
+    const profile = $('#f-codex-profile').value.trim();
+    if (profile) args.push('--profile', profile);
+    const sandbox = $('#f-codex-sandbox').value;
+    if (sandbox) args.push('--sandbox', sandbox);
+    const approval = $('#f-codex-approval').value;
+    if (approval) args.push('--ask-for-approval', approval);
   }
   const extra = $('#f-args').value.trim();
-  if (extra) args.push(...extra.match(/(?:[^\s"]+|"[^"]*")+/g).map((s) => s.replace(/"/g, '')));
+  if (extra) {
+    const parts = extra.match(/(?:[^\s"]+|"[^"]*")+/g);
+    if (parts) args.push(...parts.map((s) => s.replace(/"/g, '')));
+  }
   return args;
 }
 
@@ -842,9 +942,8 @@ async function saveDialog() {
   if (editingId) {
     const chat = config.chats.find((c) => c.id === editingId);
     Object.assign(chat, { name, cwd, shell, args });
-    // Remember defaults for next time.
-    config.settings.defaultShell = shell;
     config.settings.defaultCwd = cwd;
+    if ($('#f-make-default').checked) config.settings.defaultShell = shell;
     await saveConfigNow();
     renderSidebar();
     // If open, refresh the pane header (process keeps running until restart).
@@ -865,8 +964,8 @@ async function saveDialog() {
       lastAccessed: Date.now()
     };
     config.chats.push(chat);
-    config.settings.defaultShell = shell;
     config.settings.defaultCwd = cwd;
+    if ($('#f-make-default').checked) config.settings.defaultShell = shell;
     await saveConfigNow();
     renderSidebar();
     openPane(chat.id);
@@ -880,23 +979,27 @@ async function saveDialog() {
 // to the in-app tree browser on non-Windows or if the dialog can't open.
 async function pickFolderNative() {
   const start = $('#f-cwd').value.trim();
+  // The dialog is opened by the (background) server; if your window is focused it
+  // can land behind it — tell the user where to look.
+  toast('Opening the Windows folder dialog… (check behind this window)');
   try {
     const res = await fetch('/api/pick-folder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ start })
     });
-    if (res.status === 501) return onBrowseToggle(); // non-Windows
+    if (res.status === 501) return; // non-Windows: the in-app browser is already open
     const data = await res.json();
     if (data.path) {
       $('#f-cwd').value = data.path;
       onBrowseToggle(false);
+      toast('Folder set to ' + data.path);
     } else if (data.error) {
-      onBrowseToggle(); // dialog failed — use the in-app browser
+      toast('Could not open the Windows dialog — use the list below', 'bad');
     }
     // canceled -> leave the field untouched
   } catch (_) {
-    onBrowseToggle();
+    toast('Folder dialog failed — use the list below', 'bad');
   }
 }
 
@@ -925,6 +1028,11 @@ async function loadBrowser(dir) {
     $('#browser-path').textContent = data.dir;
     const list = $('#browser-list');
     list.innerHTML = '';
+    const native = document.createElement('div');
+    native.className = 'browser-item up';
+    native.textContent = '🖥 Open Windows folder dialog…';
+    native.addEventListener('click', () => pickFolderNative());
+    list.appendChild(native);
     const useHere = document.createElement('div');
     useHere.className = 'browser-item up';
     useHere.textContent = '✓ Use this folder';
@@ -992,7 +1100,7 @@ async function onImportFile(e) {
       throw new Error('not a phantum config');
     closeAllPanes();
     config = incoming;
-    await saveConfigNow();
+    await saveConfigNow({ force: true }); // explicit user action wins
     await bootFromConfig();
     toast('Config loaded');
   } catch (err) {
@@ -1156,7 +1264,9 @@ function wireUI() {
   $('#dialog-save').addEventListener('click', saveDialog);
   $('#f-shell').addEventListener('change', onShellChange);
   $('#f-resume').addEventListener('change', detectResumeCwd);
-  $('#f-browse').addEventListener('click', () => pickFolderNative());
+  $('#f-codex-yolo').addEventListener('change', syncCodexFlags);
+  $('#f-codex-approval').addEventListener('change', syncCodexFlags);
+  $('#f-browse').addEventListener('click', () => onBrowseToggle());
   $('#conn-reconnect').addEventListener('click', () => reconnectAll());
   $('#dialog-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'dialog-backdrop') closeDialog();
@@ -1193,7 +1303,9 @@ function wireUI() {
 function flushOnExit() {
   try {
     mirrorLocal();
-    const blob = new Blob([JSON.stringify(config)], {
+    // Tag with the rev we last saw so a stale tab's parting beacon can't revert
+    // newer chats (the server rejects it).
+    const blob = new Blob([JSON.stringify({ ...config, _baseRev: serverRev })], {
       type: 'application/json'
     });
     navigator.sendBeacon('/api/config', blob);
