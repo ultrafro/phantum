@@ -63,10 +63,19 @@ CLI](https://docs.claude.com/en/docs/claude-code) must be on your PATH.)
 1. Download / clone this repo.
 2. **Double-click `phantum.vbs`.**
    - First launch installs dependencies automatically (one time).
-   - It then opens phantum in its own app window.
+   - It starts a **system-tray controller** that runs the server in the
+     background and opens phantum in its own app window.
 3. Click **＋ New** to create your first terminal.
 
-To stop the background server, double-click **`stop-phantum.vbs`**.
+**Tray controls** (icon near the clock, right-click):
+
+- **Open phantum** — reopen the window (also on double-click)
+- **Restart server**
+- **Stop server & Exit** — fully shuts down
+
+Closing the browser window leaves the server — and your Claude sessions —
+running, so reopening just reattaches. Only **Stop server & Exit** (or
+`stop-phantum.vbs`) actually stops it, which ends those sessions too.
 
 ### The manual way (any OS)
 

@@ -170,6 +170,15 @@ app.get('/api/status', (req, res) => {
   res.json({ status: manager.statusMap(), info: manager.infoMap() });
 });
 
+// Graceful shutdown (used by the system-tray "Exit"). Localhost-only since the
+// server binds 127.0.0.1. Runs the normal shutdown path so every child pty
+// (Claude session) is killed cleanly and the config is flushed first.
+app.post('/api/shutdown', (req, res) => {
+  res.json({ ok: true });
+  console.log('[phantum] shutdown requested via API');
+  setTimeout(shutdown, 100);
+});
+
 // Native OS folder picker. The browser can't open a real Explorer dialog, but
 // the server runs on the user's own desktop, so it shells out to the Windows
 // folder-browser dialog and returns the chosen path. Falls back gracefully on
