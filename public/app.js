@@ -90,7 +90,20 @@ function onConfigConflict() {
 }
 
 // Single place that writes the whole config, tagged with the rev we last saw.
-async function postConfig(cfg, { force = false } = {}) {
+// Writes are serialized through one chain so two saves can never be in flight
+// with the same base rev — otherwise the second would come back 409 ("someone
+// else changed this") and trigger a reload that throws away in-progress work
+// (e.g. a chat you just created). Serialized, each write sees the rev the
+// previous one produced, so a 409 now only ever means a *real* external change.
+let writeChain = Promise.resolve();
+function postConfig(cfg, opts = {}) {
+  writeChain = writeChain.then(
+    () => doPostConfig(cfg, opts),
+    () => doPostConfig(cfg, opts)
+  );
+  return writeChain;
+}
+async function doPostConfig(cfg, { force = false } = {}) {
   const res = await fetch('/api/config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -954,19 +967,28 @@ async function saveDialog() {
     }
     toast('Saved — restart the terminal to apply command/dir changes');
   } else {
-    const chat = {
-      id: cryptoId(),
-      name,
-      cwd,
-      shell,
-      args,
-      createdAt: Date.now(),
-      lastAccessed: Date.now()
-    };
+    // Create through the dedicated endpoint (not a whole-config PUT): it has no
+    // optimistic-lock rev check — so a create never spuriously 409s and vanishes
+    // on the first try — and the server stamps the chat with a stable Claude
+    // session id up front, so it resumes cleanly after a restart.
+    let chat;
+    try {
+      const res = await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, cwd, shell, args })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      chat = await res.json();
+    } catch (e) {
+      console.error('create failed', e);
+      toast('Could not create the terminal — try again', 'bad');
+      return;
+    }
     config.chats.push(chat);
     config.settings.defaultCwd = cwd;
     if ($('#f-make-default').checked) config.settings.defaultShell = shell;
-    await saveConfigNow();
+    mirrorLocal();
     renderSidebar();
     openPane(chat.id);
     toast('Terminal created');
